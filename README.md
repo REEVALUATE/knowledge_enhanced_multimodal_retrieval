@@ -1,5 +1,4 @@
-# Knowledge-Enhanced Multimodal Retrieval over Cultural Heritage Knowledge Graphs
-
+# Knowledge-Enhanced Multimodal Retrieval 
 This repository contains the experimental code, models, datasets, and implementation accompanying the ESWC 2026 In-Use Track submission:
 
 **“Knowledge-Enhanced Multimodal Retrieval over Cultural Heritage Knowledge Graphs”**  
@@ -29,7 +28,7 @@ The full system architecture is shown below, illustrating the multimodal CLIP re
 This repository publicly releases **all reproducible components** used in the paper:
 
 ### ✔️ **1. Dataset: Image–Text Pairs**
-Used for CLIP fine-tuning and benchmarking.
+Used for CLIP fine-tuning and benchmarking (generated from the [KG](https://loki.linksfoundation.com/reevaluate-graphdb/graphs) ).
 
 Dataset includes:
 - Artefact image  
