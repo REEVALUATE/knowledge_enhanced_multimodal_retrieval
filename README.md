@@ -20,7 +20,7 @@ These two modules are combined through a weighted fusion strategy to support div
 ### 📌 System Architecture
 
 The full system architecture is shown below, illustrating the multimodal CLIP retrieval and the LLM-based Text2SPARQL reasoning modules.  
-![System Architecture](system_architecture.svg)
+![System Architecture](architecture.svg)
 
 ---
 
