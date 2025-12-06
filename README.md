@@ -86,7 +86,7 @@ src/
 │ ├── json2sparql/ # Python re-implementation of Sparnatural AI logic
 │ └── text2sparql_retrieval/ # KG querying utilities
 │
-scripts/ [The all scripts to be optimized, expected down by 08/12]
+scripts/ [The all scripts to be released, expected down by 08/12]
 │ ├── train_clip.sh # CLIP fine-tuning script
 │ ├── eval_clip.sh # Batch evaluation scripts
 │ ├── run_text2sparql.sh # Text2SPARQL evaluation
