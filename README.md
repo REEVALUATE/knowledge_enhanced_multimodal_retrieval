@@ -60,11 +60,11 @@ and is the backbone of the multimodal component.
 This repository includes the full implementation of:
 
 - CLIP fine-tuning  
-- CLIP evaluation (T2I, T2T, fused evaluation)  
-- Synthetic dataset usage  
+- CLIP evaluation (T2I, T2T, T2I and T2T fused evaluation)  
 - Text2SPARQL pipeline  
-- Knowledge-enhanced fusion evaluation  
-- System-level evaluation scripts  
+- Text2SPARQL evaluation
+- Knowledge-enhanced fusion strategy 
+- Knowledge-enhanced fusion evaluation   
 
 ---
 
@@ -75,11 +75,11 @@ src/
 │
 ├── clip/ 
 │ ├── data/ # Dataset loader & preprocessing 
-│ ├── models/ # CLIP wrapper, projection layers, fusion logic
-│ ├── training/ # Fine-tuning scripts (InfoNCE, mixed losses)
+│ ├── models/ # CLIP model load
+│ ├── training/ # Fine-tuning scripts
 │ ├── eval/ # T2I/T2T evaluation, metrics
-│ ├── utils/ # Checkpointing, logging, config handling
-│ └── ... # (Auto-discovered on local filesystem)
+│ ├── utils/ # logging
+│ └── ... #
 │
 ├── text2sparql/
 │ ├── entity_linking/ # SPARQL-based entity resolution
