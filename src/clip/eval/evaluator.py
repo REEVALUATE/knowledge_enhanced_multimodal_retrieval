@@ -1,8 +1,3 @@
-"""
-CLIP evaluation script with unified metrics computation.
-Supports T2I, I2T, and T2T retrieval evaluation.
-FIXED: Removed mixed precision to ensure CPU/GPU consistency.
-"""
 
 import os
 import argparse
@@ -106,8 +101,7 @@ def evaluate_clip_model(
         images, queries, targets = batch
         
         images = images.to(actual_device)
-        
-        # ✅ FIXED: Remove mixed precision, use float32 consistently
+
         # Encode images
         image_features = model.encode_image(images)
         image_features = image_features / image_features.norm(dim=-1, keepdim=True)

@@ -1,6 +1,5 @@
 """
-CLIP model wrapper with proper DDP support.
-FIXED: Forces FP32 by ensuring visual.conv1 is float32
+CLIP model 
 """
 
 import torch

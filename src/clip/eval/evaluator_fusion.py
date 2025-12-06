@@ -1,7 +1,3 @@
-"""
-Evaluator for Fusion Models (Stage 2) - FIXED with debugging.
-Computes final artifact retrieval metrics by fusing T2I and T2T scores.
-"""
 
 import os
 import argparse

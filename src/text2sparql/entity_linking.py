@@ -32,72 +32,44 @@ _WHERE_PATTERN = re.compile(r'WHERE\s*\{', re.IGNORECASE)
 _LABEL_PATTERN = re.compile(r"(\?[A-Za-z_][A-Za-z0-9_]*)\s+<http://www\.w3\.org/2000/01/rdf-schema#label>\s+(\?[A-Za-z_][A-Za-z0-9_]*)\s*\.")
 
 def fix_dimension_query(sparql: str) -> str:
-    """
-    自动修复SPARQL中的维度查询。
-    
-    检测有多少个 P90_has_value，然后：
-    1. 为每个值创建独立的 ?Dimension_N 变量
-    2. 添加对应的 P43_has_dimension 三元组
-    3. 更新 E54_Dimension 类型声明
-    
-    Args:
-        sparql: 原始SPARQL查询字符串
-        
-    Returns:
-        修复后的SPARQL查询字符串
-    """
-    
-    # 1. 检测有多少个 P90_has_value (计算 ?Value_N 的数量) - 使用预编译的 pattern
+
     value_matches = _VALUE_PATTERN.findall(sparql)
     
     if not value_matches:
         return sparql
     
-    # 获取所有 Value 的编号并排序
+
     value_numbers = sorted(set(int(n) for n in value_matches))
     num_dimensions = len(value_numbers)
 
-    
-    # 2. 查找主体变量（通常是 ?Painting_1 或类似的）- 使用预编译的 pattern
     subject_match = _SUBJECT_PATTERN.search(sparql)
     
     if subject_match:
         subject_var = f"?{subject_match.group(1)}"
     else:
-        # 尝试从其他地方推断主体变量
         painting_match = _PAINTING_PATTERN.search(sparql)
         subject_var = f"?{painting_match.group(1)}" if painting_match else "?Painting_1"
-    
-    # 3. 移除旧的维度相关三元组 - 使用预编译的 patterns
-    # 移除旧的 P43_has_dimension
+
     p43_escape_pattern = re.compile(
         r'\s*' + re.escape(subject_var) + r'\s+<[^>]*P43_has_dimension[^>]*>\s+\?Dimension_\d+\s*\.'
     )
     sparql = p43_escape_pattern.sub('', sparql)
-    
-    # 移除旧的 E54_Dimension 类型声明
+
     sparql = _E54_PATTERN.sub('', sparql)
-    
-    # 移除旧的 P90_has_value (我们会重新生成)
+
     sparql = _OLD_P90_PATTERN.sub('', sparql)
-    
-    # 4. 在查询主体开始位置插入新的维度三元组
-    # 找到主体变量第一次出现的位置（通常在 WHERE { 之后）- 使用预编译的 pattern
+
     where_match = _WHERE_PATTERN.search(sparql)
     
     if not where_match:
-        print("❌ 未找到 WHERE 子句")
         return sparql
     
     insert_pos = where_match.end()
-    
-    # 构建新的维度三元组
+
     new_triples = []
-    
-    # 添加注释
+ 
     new_triples.append("\n  # Dimensions (auto-fixed)")
-    
-    # 为每个维度生成三元组
+
     for i, value_num in enumerate(value_numbers, 1):
         dim_var = f"?Dimension_{i}"
         value_var = f"?Value_{value_num}"
@@ -116,13 +88,10 @@ def fix_dimension_query(sparql: str) -> str:
         new_triples.append(
             f"\n  {dim_var} <http://www.cidoc-crm.org/cidoc-crm/P90_has_value> {value_var}."
         )
-    
-    # 插入新的三元组
+
     new_triples_str = ''.join(new_triples)
     sparql = sparql[:insert_pos] + new_triples_str + sparql[insert_pos:]
-    
-    # print(f"✓ 已生成 {num_dimensions} 个独立的维度变量")
-    
+
     return sparql
 
 @dataclass
@@ -138,10 +107,6 @@ class ReconciliationResult:
     """Reconciliation"""
     id: str
     name: str
-
-# ============================================
-# Reconciliation Service
-# ============================================
 
 class ReconciliationService:
     """SPARQL Reconciliation"""
@@ -448,10 +413,6 @@ class ReconciliationService:
             # Fallback to individual queries
             return [self.search_entity(q[0], q[1], q[2]) for q in queries]
 
-
-# ============================================
-# JSON Post-Processor
-# ============================================
 
 class SparnaturalPostProcessor:
     """Sparnatural JSON Post-Processing with Reconciliation"""

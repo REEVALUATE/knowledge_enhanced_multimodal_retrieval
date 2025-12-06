@@ -1,7 +1,3 @@
-"""
-CLIP evaluation script with unified metrics computation.
-Supports T2I, I2T, and T2T retrieval evaluation.
-"""
 
 import os
 import argparse
