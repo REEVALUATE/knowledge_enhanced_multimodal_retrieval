@@ -28,7 +28,7 @@ The full system architecture is shown below, illustrating the multimodal CLIP re
 This repository publicly releases **all reproducible components** used in the paper:
 
 ### ✔️ **1. Dataset: Image–Text Pairs**
-Used for CLIP fine-tuning and benchmarking (generated from the [KG](https://loki.linksfoundation.com/reevaluate-graphdb/graphs) ).
+Used for CLIP fine-tuning and benchmarking (generated from the [KG](https://loki.linksfoundation.com/reevaluate-graphdb/graphs) ). [The dataset download speed to be optimized, expected down by 08/12]
 
 Dataset includes:
 - Artefact image  
@@ -73,8 +73,8 @@ This repository includes the full implementation of:
 ```
 src/
 │
-├── clip/
-│ ├── data/ # Dataset loader & preprocessing
+├── clip/ 
+│ ├── data/ # Dataset loader & preprocessing [To be optimized to allow load data from HF intead of local file for directly test, expected down by 08/12]
 │ ├── models/ # CLIP wrapper, projection layers, fusion logic
 │ ├── training/ # Fine-tuning scripts (InfoNCE, mixed losses)
 │ ├── eval/ # T2I/T2T evaluation, metrics
@@ -86,7 +86,7 @@ src/
 │ ├── json2sparql/ # Python re-implementation of Sparnatural AI logic
 │ └── text2sparql_retrieval/ # KG querying utilities
 │
-scripts/
+scripts/ [The all scripts to be optimized, expected down by 08/12]
 │ ├── train_clip.sh # CLIP fine-tuning script
 │ ├── eval_clip.sh # Batch evaluation scripts
 │ ├── run_text2sparql.sh # Text2SPARQL evaluation
