@@ -1,3 +1,7 @@
+"""
+Evaluator for Fusion Models (Stage 2) 
+Computes final artifact retrieval metrics by fusing T2I and T2T scores.
+"""
 
 import os
 import argparse
@@ -91,7 +95,6 @@ def evaluate_fusion_model(
                 target_embed=batch_targets
             )
             
-            # ✅ Debug: Print score statistics for first block
             if first_block:
                 logger.info("="*60)
                 logger.info("SCORE STATISTICS (First Block)")

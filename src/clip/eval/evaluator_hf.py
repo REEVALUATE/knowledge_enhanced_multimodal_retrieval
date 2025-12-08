@@ -13,12 +13,20 @@ import numpy as np
 import random
 
 import torch
+from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 import clip
 
+import json
+from pathlib import Path
+from typing import List
+import torch
+from torch.utils.data import Dataset
+from PIL import Image
+import logging
+
 from ..model.clip_model import load_clip_model
-from ..datasets.clip_dataset import CLIPEvalDataset as CLIPEvaluationDataset 
 from ..datasets.clip_dataset import collate_fn_eval
 from ..utils.data_utils import get_data_splits, load_splits_from_json
 from ..utils.logging_utils import setup_logger, save_metrics_to_json
@@ -35,6 +43,81 @@ def seed_worker(worker_id):
     np.random.seed(worker_seed)
     random.seed(worker_seed)
 
+class CLIPEvaluationDataset(Dataset):
+    """
+    Evaluation dataset for CLIP with query-target pairs.
+    
+    Returns: (image, query, target_text)
+    """
+    
+    def __init__(
+        self,
+        uuids: List[str],
+        image_folder: str,
+        text_folder: str,
+        preprocessor=None,
+        max_text_length: int = 150
+    ):
+        self.uuids = uuids
+        self.image_folder = Path(image_folder)
+        self.text_folder = Path(text_folder)
+        self.preprocessor = preprocessor
+        self.max_text_length = max_text_length
+        
+        logger.info(f"Evaluation dataset initialized: {len(uuids)} samples")
+    
+    def __len__(self):
+        return len(self.uuids)
+    
+    def _truncate_text(self, text: str) -> str:
+        """Truncate text to max_text_length words."""
+        words = text.split()
+        if len(words) > self.max_text_length:
+            return " ".join(words[:self.max_text_length])
+        return text
+    
+    def __getitem__(self, idx):
+        uuid = self.uuids[idx]
+        
+        # Load image
+        image_path = self.image_folder / f"{uuid}.jpg"
+        if not image_path.exists():
+            for ext in ['.jpeg', '.png']:
+                alt_path = self.image_folder / f"{uuid}{ext}"
+                if alt_path.exists():
+                    image_path = alt_path
+                    break
+        
+        try:
+            image = Image.open(image_path).convert('RGB')
+            if self.preprocessor:
+                # Check if HuggingFace processor or OpenAI CLIP preprocess
+                if hasattr(self.preprocessor, 'image_processor'):
+                    # HuggingFace CLIPProcessor
+                    processed = self.preprocessor(images=image, return_tensors="pt")
+                    image = processed["pixel_values"].squeeze(0)  # [3,224,224]
+                else:
+                    # OpenAI CLIP preprocess
+                    image = self.preprocessor(image)
+        except Exception as e:
+            logger.error(f"Error loading image {uuid}: {e}")
+            image = torch.zeros(3, 224, 224)
+        
+        # Load texts
+        text_path = self.text_folder / f"{uuid}.json"
+        try:
+            with open(text_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                query = self._truncate_text(data.get('query', ''))
+                target_text = self._truncate_text(data.get('target_text', ''))
+                uuid = data.get('uuid', uuid)
+        except Exception as e:
+            logger.error(f"Error loading text for {uuid}: {e}")
+            query = ""
+            target_text = ""
+        
+        return image, query, target_text, uuid
+    
 
 @torch.no_grad()
 def evaluate_clip_model(
@@ -84,11 +167,9 @@ def evaluate_clip_model(
         dataset,
         batch_size=batch_size,
         shuffle=False,  # No shuffle for deterministic evaluation
-        num_workers=4,
-        pin_memory=use_cuda,
+        num_workers=0,
+        pin_memory=False,
         collate_fn=collate_fn_eval,
-        worker_init_fn=seed_worker,
-        generator=g
     )
     
     all_image_embeddings = []
@@ -102,15 +183,10 @@ def evaluate_clip_model(
         
         images = images.to(actual_device)
         
-        # Encode images
-        if use_cuda:
-            with torch.cuda.amp.autocast():
-                image_features = model.get_image_features(pixel_values=images)
-                image_features = image_features / image_features.norm(dim=-1, keepdim=True)
-        else:
-            image_features = model.get_image_features(pixel_values=images)
-            image_features = image_features / image_features.norm(dim=-1, keepdim=True)
-        
+
+        image_features = model.get_image_features(pixel_values=images)
+        image_features = image_features / image_features.norm(dim=-1, keepdim=True)
+    
         all_image_embeddings.append(image_features.cpu().numpy())
         
         # Encode query texts
@@ -122,13 +198,9 @@ def evaluate_clip_model(
                                 max_length=77,   # CLIP 标准长度
                             )
         text_inputs = {k: v.to(actual_device) for k, v in text_inputs.items()}
-        if use_cuda:
-            with torch.cuda.amp.autocast():
-                query_features = model.get_text_features(**text_inputs)
-                query_features = query_features / query_features.norm(dim=-1, keepdim=True)
-        else:
-            query_features = model.get_text_features(**text_inputs)
-            query_features = query_features / query_features.norm(dim=-1, keepdim=True)
+
+        query_features = model.get_text_features(**text_inputs)
+        query_features = query_features / query_features.norm(dim=-1, keepdim=True)
         
         all_query_embeddings.append(query_features.cpu().numpy())
         
@@ -141,13 +213,8 @@ def evaluate_clip_model(
                                 max_length=77,
                             )
         text_inputs = {k: v.to(actual_device) for k, v in text_inputs.items()}
-        if use_cuda:
-            with torch.cuda.amp.autocast():
-                target_features = model.get_text_features(**text_inputs)
-                target_features = target_features / target_features.norm(dim=-1, keepdim=True)
-        else:
-            target_features = model.get_text_features(**text_inputs)
-            target_features = target_features / target_features.norm(dim=-1, keepdim=True)
+        target_features = model.get_text_features(**text_inputs)
+        target_features = target_features / target_features.norm(dim=-1, keepdim=True)
         
         all_target_embeddings.append(target_features.cpu().numpy())
     
@@ -159,11 +226,7 @@ def evaluate_clip_model(
     logger.info(f"Image embeddings: {image_embeddings.shape}")
     logger.info(f"Query embeddings: {query_embeddings.shape}")
     logger.info(f"Target embeddings: {target_embeddings.shape}")
-    
-    # Compute metrics using realistic scenario:
-    # T2I: Query → Image
-    # I2T: Image → Target
-    # T2T: Query → Target
+
     from .metrics import compute_all_retrieval_metrics
     
     metrics = compute_all_retrieval_metrics(
@@ -275,19 +338,9 @@ def main():
     logger.info(f"Random seed: {args.seed}")
     logger.info("="*80)
     
-    # Get data splits
-    if args.splits_file and Path(args.splits_file).exists():
-        logger.info(f"\nLoading splits from {args.splits_file}")
-        train_uuids, val_uuids, test_uuids = load_splits_from_json(args.splits_file)
-    else:
-        logger.info("\nGenerating data splits...")
-        train_uuids, val_uuids, test_uuids = get_data_splits(
-            args.images_dir,
-            args.texts_dir,
-            test_size=0.15,
-            val_size=0.1,
-            random_seed=args.seed
-        )
+
+    train_uuids, val_uuids, test_uuids = load_splits_from_json(args.splits_file)
+
     
     split_map = {
         'train': train_uuids,
@@ -303,18 +356,13 @@ def main():
     device = args.device if torch.cuda.is_available() else 'cpu'
     if args.device == 'cuda' and not torch.cuda.is_available():
         logger.warning("CUDA not available, using CPU")
-    
-    # model, preprocess = load_clip_model(
-    #     model_name=args.model_name,
-    #     checkpoint_path=args.checkpoint,
-    #     device=device
-    # )
+
     from transformers import CLIPProcessor, CLIPModel
     from PIL import Image
 
     print("Loading model xuemduan/reevaluate-clip2...")
-    model = CLIPModel.from_pretrained("xuemduan/reevaluate-clip-hybrid-o2")
-    preprocess = CLIPProcessor.from_pretrained("xuemduan/reevaluate-clip-hybrid-o2")
+    model = CLIPModel.from_pretrained("xuemduan/reevaluate-clip")
+    preprocess = CLIPProcessor.from_pretrained("xuemduan/reevaluate-clip")
     # put move to device
     model.to(device)
     print("Model loaded and moved to device.")

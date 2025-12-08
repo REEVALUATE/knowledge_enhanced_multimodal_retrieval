@@ -1,6 +1,5 @@
 """
 Shared utility functions for data splitting and text selection.
-Ensures deterministic behavior across all experiments.
 """
 
 import json

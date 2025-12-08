@@ -1,5 +1,5 @@
 """
-Evaluator for Fusion Models 
+Evaluator for Fusion Models (Stage 2) 
 """
 
 import os
@@ -97,7 +97,8 @@ def evaluate_fusion_model(
                 image_embed=batch_images,
                 target_embed=batch_targets
             )
-
+            
+            # Debug: Print score statistics for first block
             if first_block:
                 logger.info("="*60)
                 logger.info("SCORE STATISTICS (First Block)")
@@ -174,6 +175,9 @@ def main():
         format='%(asctime)s - %(levelname)s - %(message)s'
     )
     
+    logger.info("="*80)
+    logger.info("Fusion Model Evaluation (CPU/GPU Consistent)")
+    logger.info("="*80)
     
     train_uuids, val_uuids, test_uuids = load_splits_from_json(args.splits_file)
     

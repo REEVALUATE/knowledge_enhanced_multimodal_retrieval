@@ -1,3 +1,7 @@
+"""
+CLIP evaluation script with unified metrics computation.
+Supports T2I, I2T, and T2T retrieval evaluation.
+"""
 
 import os
 import argparse
@@ -97,39 +101,22 @@ def evaluate_clip_model(
         
         images = images.to(actual_device)
         
+        # ✅ FIXED: Remove mixed precision, use float32 consistently
         # Encode images
-        if use_cuda:
-            with torch.cuda.amp.autocast():
-                image_features = model.encode_image(images)
-                image_features = image_features / image_features.norm(dim=-1, keepdim=True)
-        else:
-            image_features = model.encode_image(images)
-            image_features = image_features / image_features.norm(dim=-1, keepdim=True)
-        
+        image_features = model.encode_image(images)
+        image_features = image_features / image_features.norm(dim=-1, keepdim=True)
         all_image_embeddings.append(image_features.cpu().numpy())
         
         # Encode query texts
         query_tokens = clip.tokenize(queries, truncate=True).to(actual_device)
-        if use_cuda:
-            with torch.cuda.amp.autocast():
-                query_features = model.encode_text(query_tokens)
-                query_features = query_features / query_features.norm(dim=-1, keepdim=True)
-        else:
-            query_features = model.encode_text(query_tokens)
-            query_features = query_features / query_features.norm(dim=-1, keepdim=True)
-        
+        query_features = model.encode_text(query_tokens)
+        query_features = query_features / query_features.norm(dim=-1, keepdim=True)
         all_query_embeddings.append(query_features.cpu().numpy())
         
         # Encode target texts
         target_tokens = clip.tokenize(targets, truncate=True).to(actual_device)
-        if use_cuda:
-            with torch.cuda.amp.autocast():
-                target_features = model.encode_text(target_tokens)
-                target_features = target_features / target_features.norm(dim=-1, keepdim=True)
-        else:
-            target_features = model.encode_text(target_tokens)
-            target_features = target_features / target_features.norm(dim=-1, keepdim=True)
-        
+        target_features = model.encode_text(target_tokens)
+        target_features = target_features / target_features.norm(dim=-1, keepdim=True)
         all_target_embeddings.append(target_features.cpu().numpy())
     
     # Concatenate embeddings

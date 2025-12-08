@@ -1,3 +1,7 @@
+"""
+CLIP evaluation script with unified metrics computation.
+Supports T2I, I2T, and T2T retrieval evaluation.
+"""
 
 import os
 import argparse
@@ -19,6 +23,7 @@ from ..datasets.clip_dataset import collate_fn_eval
 from ..utils.data_utils import get_data_splits, load_splits_from_json
 from ..utils.logging_utils import setup_logger, save_metrics_to_json
 from .metrics import compute_all_retrieval_metrics, compute_training_metrics
+from .fusion import *
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +39,15 @@ def seed_worker(worker_id):
     worker_seed = torch.initial_seed() % 2**32
     np.random.seed(worker_seed)
     random.seed(worker_seed)
+
+text2sparql_results = {}
+results = os.listdir("experiments/text2sparql/results")
+for result_file in results:
+    uuid = result_file.split(".")[0]
+    with open(os.path.join("experiments/text2sparql/results", result_file), "r") as f:
+        result_data = f.readlines()
+        result_data = [line.strip() for line in result_data]
+        text2sparql_results[uuid] = result_data
 
 
 @torch.no_grad()
@@ -94,11 +108,12 @@ def evaluate_clip_model(
     all_image_embeddings = []
     all_query_embeddings = []
     all_target_embeddings = []
+    uuid_list = []
     
     logger.info(f"Computing embeddings for {len(dataset)} samples...")
     
     for batch in tqdm(dataloader, desc="Encoding"):
-        images, queries, targets = batch
+        images, queries, targets, uuids = batch
         
         images = images.to(actual_device)
 
@@ -119,10 +134,13 @@ def evaluate_clip_model(
         target_features = target_features / target_features.norm(dim=-1, keepdim=True)
         all_target_embeddings.append(target_features.cpu().numpy())
     
+        uuid_list.append(uuids)
+
     # Concatenate embeddings
     image_embeddings = np.concatenate(all_image_embeddings, axis=0)
     query_embeddings = np.concatenate(all_query_embeddings, axis=0)
     target_embeddings = np.concatenate(all_target_embeddings, axis=0)
+    uuid_list = np.concatenate(uuid_list, axis=0)
 
 
     logger.info(f"Image embeddings: {image_embeddings.shape}")
@@ -143,7 +161,63 @@ def evaluate_clip_model(
         compute_recall=compute_recall,
         compute_mrr=compute_mrr
     )
-    
+    print("0.5 0.5=============================")
+    t2i_weight = 0.5
+    t2t_weight = 0.5
+    t2i_similarity_matrix = query_embeddings @ image_embeddings.T  # (N, N)
+    t2t_similarity_matrix = query_embeddings @ target_embeddings.T  # (N, N
+    similarity_matrix = (t2i_weight * t2i_similarity_matrix) + (t2t_weight * t2t_similarity_matrix)
+    print("T2I")
+    results = evaluate_retrieval(t2i_similarity_matrix)
+    print("T2T")
+    results = evaluate_retrieval(t2t_similarity_matrix)
+    print("Fused")
+    results = evaluate_retrieval(similarity_matrix)
+    alphas = [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1]
+
+    for alpha in alphas:
+        print(f"Testing Weighted Fusion with alpha={alpha}...")
+        fused_weighted = fuse_clip_and_text2sparql(
+            clip_similarity_matrix=similarity_matrix,
+            text2sparql_results=text2sparql_results,
+            query_uuids=uuid_list,
+            artefact_uuids=uuid_list,
+            fusion_strategy="weighted",
+            fusion_params={"alpha": alpha, "sparql_weight": 1 - alpha}
+        )
+        print(f"Fused matrix shape: {fused_weighted.shape}")
+        print(f"Fused matrix range: [{fused_weighted.min():.4f}, {fused_weighted.max():.4f}]")
+        results = evaluate_retrieval(fused_weighted)
+
+    print("0.9 0.1=============================")
+    t2i_weight = 0.1
+    t2t_weight = 0.9
+    t2i_similarity_matrix = query_embeddings @ image_embeddings.T  # (N, N)
+    t2t_similarity_matrix = query_embeddings @ target_embeddings.T  # (N, N
+    similarity_matrix = (t2i_weight * t2i_similarity_matrix) + (t2t_weight * t2t_similarity_matrix)
+    print("T2I")
+    results = evaluate_retrieval(t2i_similarity_matrix)
+    print("T2T")
+    results = evaluate_retrieval(t2t_similarity_matrix)
+    print("Fused")
+    results = evaluate_retrieval(similarity_matrix)
+    alphas = [0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.3, 0.2, 0.1]
+
+    for alpha in alphas:
+        print(f"Testing Weighted Fusion with alpha={alpha}...")
+        fused_weighted = fuse_clip_and_text2sparql(
+            clip_similarity_matrix=similarity_matrix,
+            text2sparql_results=text2sparql_results,
+            query_uuids=uuid_list,
+            artefact_uuids=uuid_list,
+            fusion_strategy="weighted",
+            fusion_params={"alpha": alpha, "sparql_weight": 1 - alpha}
+        )
+        print(f"Fused matrix shape: {fused_weighted.shape}")
+        print(f"Fused matrix range: [{fused_weighted.min():.4f}, {fused_weighted.max():.4f}]")
+        results = evaluate_retrieval(fused_weighted)
+
+
     return metrics
 
 

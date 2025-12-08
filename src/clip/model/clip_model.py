@@ -1,5 +1,5 @@
 """
-CLIP model 
+CLIP model wrapper with proper DDP support.
 """
 
 import torch
@@ -15,74 +15,56 @@ logger = logging.getLogger(__name__)
 def load_clip_model(
     model_name: str = 'ViT-L/14',
     checkpoint_path: Optional[str] = None,
-    device: str = 'cuda'
+    device: str = 'cuda:0'
 ) -> Tuple[nn.Module, object]:
     """
+    Load CLIP model.
     
     Args:
         model_name: CLIP model name (ViT-B/32, ViT-B/16, ViT-L/14)
         checkpoint_path: Path to checkpoint file (optional)
         device: Device to load model on
+        freeze_encoders: Deprecated, kept for compatibility
         
     Returns:
-        model: CLIP model in FP32 
+        model: CLIP model (not wrapped, ready for DDP in trainer)
         preprocess: Image preprocessing function
+        
+    Note:
+        - Returns the raw CLIP model, NOT wrapped
+        - DDP wrapping happens in the trainer
+        - Model is always in float32 for stable training
     """
     logger.info(f"Loading CLIP model: {model_name}")
-
-    clip_model, preprocess = clip.load(model_name, device=device, jit=False)
-
+    
+    # Load pretrained CLIP
+    clip_model, preprocess = clip.load(model_name, device=device)
+    
+    # CRITICAL: Ensure float32 (CLIP sometimes loads in float16)
     clip_model = clip_model.float()
-
-    if hasattr(clip_model, 'visual'):
-        clip_model.visual = clip_model.visual.float()
-        
-        # Extra insurance: explicitly convert conv1
-        if hasattr(clip_model.visual, 'conv1'):
-            clip_model.visual.conv1 = clip_model.visual.conv1.float()
-            logger.info("✓ Visual encoder conv1 forced to float32")
     
-    # 3. Also ensure text encoder is float32
-    if hasattr(clip_model, 'transformer'):
-        clip_model.transformer = clip_model.transformer.float()
-    
-    if hasattr(clip_model, 'token_embedding'):
-        clip_model.token_embedding = clip_model.token_embedding.float()
-    
-    if hasattr(clip_model, 'positional_embedding'):
-        clip_model.positional_embedding = clip_model.positional_embedding.float()
-    
-    # 4. Verify all parameters are FP32
-    param_dtype = next(clip_model.parameters()).dtype
-    if param_dtype != torch.float32:
-        logger.warning(f"⚠️ Parameters are {param_dtype}, forcing to float32")
-        clip_model = clip_model.float()
-    
-    logger.info(f"✓ Model parameters: {param_dtype}")
-    
+    # Load checkpoint if provided
     if checkpoint_path and Path(checkpoint_path).exists():
-        logger.info(f"Loading checkpoint from {checkpoint_path}")
+        print(f"Loading checkpoint from {checkpoint_path}")
         checkpoint = torch.load(checkpoint_path, map_location=device)
         
         # Handle different checkpoint formats
         if 'model_state_dict' in checkpoint:
             state_dict = checkpoint['model_state_dict']
+            print(f"  Loaded 'model_state_dict' from checkpoint")
         elif 'state_dict' in checkpoint:
             state_dict = checkpoint['state_dict']
+            print(f"  Loaded 'state_dict' from checkpoint")
         else:
+            # Assume checkpoint is the state dict itself
             state_dict = checkpoint
+            print(f"  Loaded checkpoint as state_dict directly")
         
         # Load state dict
         clip_model.load_state_dict(state_dict, strict=True)
-        
-        # Re-apply FP32 after loading checkpoint
-        clip_model = clip_model.float()
-        if hasattr(clip_model, 'visual') and hasattr(clip_model.visual, 'conv1'):
-            clip_model.visual.conv1 = clip_model.visual.conv1.float()
-        
-        logger.info(f"✓ Checkpoint loaded and converted to float32")
-        
-        # Log checkpoint info
+        logger.info(f"Checkpoint loaded successfully")
+
+        # Log checkpoint info if available
         if 'epoch' in checkpoint:
             logger.info(f"  Checkpoint epoch: {checkpoint['epoch']}")
         if 'best_metric' in checkpoint:
@@ -90,75 +72,7 @@ def load_clip_model(
     else:
         logger.info("Using pretrained CLIP from OpenAI")
     
-
-    if device == 'cuda' and not clip_model.training:
-        try:
-            test_img = torch.randn(1, 3, 224, 224).to(device)
-            clip_model.eval()
-            with torch.no_grad():
-                test_feat = clip_model.encode_image(test_img)
-                output_dtype = test_feat.dtype
-                
-                if output_dtype != torch.float32:
-                    logger.error(f"❌ Encode outputs {output_dtype} instead of float32!")
-                    logger.error(f"   This will cause evaluation issues!")
-                    
-                    # Last resort: monkey patch encode methods
-                    logger.info("   Applying emergency fix...")
-                    clip_model = _force_fp32_monkey_patch(clip_model)
-                    
-                    # Test again
-                    test_feat = clip_model.encode_image(test_img)
-                    logger.info(f"   After fix: {test_feat.dtype}")
-                else:
-                    logger.info(f"✓ Encode output verified: {output_dtype}")
-        except Exception as e:
-            logger.warning(f"Could not verify encode dtype: {e}")
-    
-    # Final summary
-    logger.info("="*60)
-    logger.info("CLIP Model Loaded - FP32 Mode")
-    logger.info(f"  Model: {model_name}")
-    logger.info(f"  Device: {device}")
-    logger.info(f"  Dtype: {next(clip_model.parameters()).dtype}")
-    logger.info("="*60)
-    
     return clip_model, preprocess
-
-
-def _force_fp32_monkey_patch(model):
-    """
-    Emergency fix: Monkey patch encode methods to remove dtype conversion.
-    Only used if regular fix doesn't work.
-    """
-    logger.warning("Applying monkey patch to force FP32 encoding")
-    
-    # Save original methods
-    original_encode_image = model.encode_image
-    original_encode_text = model.encode_text
-    
-    # Create patched encode_image
-    def patched_encode_image(image):
-        # Force input to float32
-        return model.visual(image.float())
-    
-    # Create patched encode_text  
-    def patched_encode_text(text):
-        x = model.token_embedding(text).float()
-        x = x + model.positional_embedding.float()
-        x = x.permute(1, 0, 2)
-        x = model.transformer(x)
-        x = x.permute(1, 0, 2)
-        x = model.ln_final(x).float()
-        x = x[torch.arange(x.shape[0]), text.argmax(dim=-1)] @ model.text_projection.float()
-        return x
-    
-    # Replace methods
-    model.encode_image = patched_encode_image
-    model.encode_text = patched_encode_text
-    
-    logger.info("✓ Monkey patch applied")
-    return model
 
 
 def save_checkpoint(
@@ -352,7 +266,9 @@ def get_trainable_params(model: nn.Module) -> int:
 def print_model_info(model: nn.Module):
     """
     Print model information.
-
+    
+    Args:
+        model: Model (can be DDP-wrapped or not)
     """
     # Unwrap DDP if needed
     if isinstance(model, torch.nn.parallel.DistributedDataParallel):

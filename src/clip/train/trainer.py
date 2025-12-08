@@ -1,5 +1,5 @@
 """
-CLIP Domain Adaptive Fine-Tuning 
+CLIP training script with DDP support and joint T2I+T2T loss.
 """
 
 import os
@@ -165,8 +165,7 @@ class CLIPTrainer:
             
             # Forward pass with mixed precision
             with autocast(enabled=self.mixed_precision):
-                # Encode images and texts
-                # CRITICAL FIX: Access model correctly whether DDP or not
+
                 base_model = self._get_model()
                 
                 image_features = base_model.encode_image(images)
@@ -392,9 +391,7 @@ def main_worker(rank, world_size, args):
         checkpoint_path=args.checkpoint,
         device=device
     )
-    
-    # CRITICAL FIX: Ensure model is in float32 for stable training
-    # The original CLIP model is loaded in float32, but DDP/AMP can cause precision issues
+
     model = model.float()
     
     # Create datasets

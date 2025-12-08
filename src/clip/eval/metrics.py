@@ -28,10 +28,10 @@ def compute_recall_at_k(
     
     # Get top-k indices
     max_k = max(k_values)
-    if max_k < similarity_matrix.shape[1]:
-        top_k_indices = np.argpartition(-similarity_matrix, max_k - 1, axis=1)[:, :max_k]
-    else:
-        top_k_indices = np.argsort(-similarity_matrix, axis=1)
+    # if max_k < similarity_matrix.shape[1]:
+    #     top_k_indices = np.argpartition(-similarity_matrix, max_k - 1, axis=1)[:, :max_k]
+    # else:
+    top_k_indices = np.argsort(-similarity_matrix, axis=1)
     
     # Ground truth: diagonal (query i matches candidate i)
     targets = np.arange(N)[:, None]  # (N, 1)
@@ -100,7 +100,7 @@ def compute_retrieval_metrics(
     """
     # Compute similarity matrix
     similarity_matrix = query_embeddings @ candidate_embeddings.T  # (N, N)
-    
+
     metrics = {}
     
     if compute_recall:
@@ -282,19 +282,11 @@ def compute_training_metrics(
     )
 
 
-# ============ Backward compatibility functions ============
-# These are DEPRECATED and kept only for old code compatibility
-
 def compute_metrics_multi_mode(
     image_embeddings: np.ndarray,
     text_embeddings_by_variant: List[np.ndarray]
 ) -> Dict[str, float]:
-    """
-    DEPRECATED: For backward compatibility with old multi-variant code.
-    
-    WARNING: This assumes old data format with 5 variants.
-    For new query-target format, use compute_all_retrieval_metrics instead.
-    """
+
     logger.warning(
         "compute_metrics_multi_mode is DEPRECATED. "
         "Use compute_all_retrieval_metrics with query_embeddings and target_embeddings instead."

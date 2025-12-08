@@ -6,21 +6,27 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+class SimpleGatedFusionWithBias(nn.Module):
+    def __init__(self, embed_dim: int = 768):
+        super().__init__()
+        self.query_weight = nn.Parameter(torch.zeros(embed_dim))  # ✅ 从0开始
+        self.bias = nn.Parameter(torch.tensor(-2.0))  # ✅ 初始化为-2
+
+    def forward(self, query_embed, image_embed, target_embed):
+        t2i_sim = query_embed @ image_embed.T
+        t2t_sim = query_embed @ target_embed.T
+        
+        gate_logit = (query_embed * self.query_weight).sum(dim=1, keepdim=True) + self.bias
+        gate = torch.sigmoid(gate_logit)  # ≈ 0.1初始
+        
+        scores = gate * t2i_sim + (1 - gate) * t2t_sim
+        return scores
 
 class LinearFusionHead(nn.Module):
-    """
-    Simple linear fusion of T2I and T2T scores.
-    Learns optimal weights for combining the two scores.
-    """
+    """Simple linear fusion of T2I and T2T scores."""
     
     def __init__(self, hidden_dim: int = 128):
-        """
-        Args:
-            hidden_dim: Hidden dimension for MLP (optional)
-        """
         super().__init__()
-        
-        # Simple linear layer: [t2i_sim, t2t_sim] -> score
         self.fusion = nn.Sequential(
             nn.Linear(2, hidden_dim),
             nn.ReLU(),
@@ -33,46 +39,31 @@ class LinearFusionHead(nn.Module):
         Args:
             t2i_sim: (N, M) T2I similarity scores
             t2t_sim: (N, M) T2T similarity scores
-            
         Returns:
             scores: (N, M) fused scores
         """
-        # Stack similarities: (N, M, 2)
-        combined = torch.stack([t2i_sim, t2t_sim], dim=-1)
-        
-        # Apply fusion: (N, M, 2) -> (N, M, 1) -> (N, M)
-        scores = self.fusion(combined).squeeze(-1)
-        
+        combined = torch.stack([t2i_sim, t2t_sim], dim=-1)  # (N, M, 2)
+        scores = self.fusion(combined).squeeze(-1)  # (N, M)
+
         return scores
 
 
 class CrossAttentionFusionHead(nn.Module):
-    """
-    Cross-attention fusion that allows query to attend to T2I and T2T features.
-    More sophisticated than linear fusion.
-    """
+    """Cross-attention fusion (query attends to T2I and T2T features)."""
     
     def __init__(
         self,
-        embed_dim: int = 768,  # CLIP embedding dimension
+        embed_dim: int = 768,
         num_heads: int = 8,
         hidden_dim: int = 256
     ):
-        """
-        Args:
-            embed_dim: Embedding dimension (768 for ViT-L/14)
-            num_heads: Number of attention heads
-            hidden_dim: Hidden dimension for final MLP
-        """
         super().__init__()
         self.embed_dim = embed_dim
         
-        # Project query, image, target embeddings to same space if needed
         self.query_proj = nn.Linear(embed_dim, embed_dim)
         self.image_proj = nn.Linear(embed_dim, embed_dim)
         self.target_proj = nn.Linear(embed_dim, embed_dim)
         
-        # Cross-attention: query attends to [image, target]
         self.cross_attn = nn.MultiheadAttention(
             embed_dim=embed_dim,
             num_heads=num_heads,
@@ -80,7 +71,6 @@ class CrossAttentionFusionHead(nn.Module):
             dropout=0.1
         )
         
-        # Final MLP to produce score
         self.score_mlp = nn.Sequential(
             nn.Linear(embed_dim, hidden_dim),
             nn.ReLU(),
@@ -99,68 +89,170 @@ class CrossAttentionFusionHead(nn.Module):
     ) -> torch.Tensor:
         """
         Args:
-            query_embed: (N, D) query embeddings
-            image_embed: (M, D) image embeddings (candidates)
-            target_embed: (M, D) target text embeddings (candidates)
-            
+            query_embed: (N, D)
+            image_embed: (M, D)
+            target_embed: (M, D)
         Returns:
-            scores: (N, M) fused scores
+            scores: (N, M)
         """
         N = query_embed.shape[0]
         M = image_embed.shape[0]
         D = query_embed.shape[1]
         
-        # Project embeddings
-        query = self.query_proj(query_embed)  # (N, D)
-        image = self.image_proj(image_embed)  # (M, D)
-        target = self.target_proj(target_embed)  # (M, D)
+        # Project
+        query = self.query_proj(query_embed)
+        image = self.image_proj(image_embed)
+        target = self.target_proj(target_embed)
         
-        # Expand for all pairs: (N, M, D)
+        # Expand for all pairs
         query_exp = query.unsqueeze(1).expand(N, M, D)
         image_exp = image.unsqueeze(0).expand(N, M, D)
         target_exp = target.unsqueeze(0).expand(N, M, D)
         
-        # Reshape to process all pairs in batch
-        query_flat = query_exp.reshape(N * M, 1, D)  # (N*M, 1, D)
-        
-        # Stack image and target for each pair: (N*M, 2, D)
+        # Reshape
+        query_flat = query_exp.reshape(N * M, 1, D)
         kv_flat = torch.stack([
             image_exp.reshape(N * M, D),
             target_exp.reshape(N * M, D)
         ], dim=1)  # (N*M, 2, D)
         
-        # Cross-attention: each query attends to its [image, target] pair
+        # Cross-attention
         attn_output, _ = self.cross_attn(
-            query=query_flat,      # (N*M, 1, D)
-            key=kv_flat,           # (N*M, 2, D)
-            value=kv_flat          # (N*M, 2, D)
-        )  # Output: (N*M, 1, D)
+            query=query_flat,
+            key=kv_flat,
+            value=kv_flat
+        )
         
-        # Score for each pair
+        # Score
         attn_out = attn_output.squeeze(1)  # (N*M, D)
         scores_flat = self.score_mlp(attn_out).squeeze(-1)  # (N*M,)
+
+        scores_flat = torch.tanh(scores_flat) * 0.5  # 输出范围 [-0.5, 0.5]
         
-        # Reshape back to (N, M)
         scores = scores_flat.reshape(N, M)
+        return scores
+
+
+class GatedFusionHead(nn.Module):
+    """
+    Gated fusion: Learn query-specific weight for T2I vs T2T.
+    Simple and effective!
+    """
+    
+    def __init__(self, embed_dim: int = 768):
+        super().__init__()
+        
+        # Gate network: query -> weight for T2I
+        self.gate_net = nn.Sequential(
+            nn.Linear(embed_dim, 128),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(128, 1),
+            nn.Sigmoid()  # Output in [0, 1]
+        )
+    
+    def forward(
+        self,
+        query_embed: torch.Tensor,
+        image_embed: torch.Tensor,
+        target_embed: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Args:
+            query_embed: (N, D)
+            image_embed: (M, D)
+            target_embed: (M, D)
+        Returns:
+            scores: (N, M)
+        """
+        # Compute base similarities
+        t2i_sim = query_embed @ image_embed.T  # (N, M)
+        t2t_sim = query_embed @ target_embed.T  # (N, M)
+        
+        # Compute query-specific gate (weight for T2I)
+        gate = self.gate_net(query_embed)  # (N, 1)
+        
+        # Weighted fusion
+        # gate = 1 → use T2I
+        # gate = 0 → use T2T
+        scores = gate * t2i_sim + (1 - gate) * t2t_sim  # (N, M)
+        
+        return scores
+
+class SimpleGatedFusion(nn.Module):
+    def __init__(self, embed_dim: int = 768):
+        super().__init__()
+        self.query_weight = nn.Parameter(torch.ones(embed_dim))
+        self.bias = nn.Parameter(torch.zeros(1))
+    
+    def forward(self, query_embed, image_embed, target_embed):
+        t2i_sim = query_embed @ image_embed.T
+        t2t_sim = query_embed @ target_embed.T
+        
+        gate_logit = (query_embed * self.query_weight).sum(dim=1, keepdim=True) + self.bias
+        gate = torch.sigmoid(gate_logit)
+        
+        scores = gate * t2i_sim + (1 - gate) * t2t_sim
+        return scores
+    
+class BilinearFusionHead(nn.Module):
+    """
+    Bilinear fusion: Learn transformation for image and target separately.
+    Then compute similarity with query.
+    """
+    
+    def __init__(self, embed_dim: int = 768):
+        super().__init__()
+        
+        # Bilinear layers (no bias for symmetry)
+        self.W_image = nn.Linear(embed_dim, embed_dim, bias=False)
+        self.W_target = nn.Linear(embed_dim, embed_dim, bias=False)
+        
+        # Optional: learnable weight for combining
+        self.alpha = nn.Parameter(torch.tensor(0.5))  # Weight for T2I
+    
+    def forward(
+        self,
+        query_embed: torch.Tensor,
+        image_embed: torch.Tensor,
+        target_embed: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Args:
+            query_embed: (N, D)
+            image_embed: (M, D)
+            target_embed: (M, D)
+        Returns:
+            scores: (N, M)
+        """
+        # Project image and target
+        image_proj = self.W_image(image_embed)  # (M, D)
+        target_proj = self.W_target(target_embed)  # (M, D)
+        
+        # Bilinear scores
+        t2i_scores = query_embed @ image_proj.T  # (N, M)
+        t2t_scores = query_embed @ target_proj.T  # (N, M)
+        
+        # Weighted combination
+        alpha = torch.sigmoid(self.alpha)  # Constrain to [0, 1]
+        scores = alpha * t2i_scores + (1 - alpha) * t2t_scores
         
         return scores
 
 
 class FusionModel(nn.Module):
-    """
-    Wrapper for fusion model with frozen CLIP encoder.
-    """
+    """Wrapper for fusion model with frozen CLIP encoder."""
     
     def __init__(
         self,
         clip_model,
-        fusion_type: str = "linear",  # "linear" or "cross_attention"
+        fusion_type: str = "linear",
         embed_dim: int = 768
     ):
         """
         Args:
             clip_model: Frozen CLIP model
-            fusion_type: Type of fusion head
+            fusion_type: "linear", "cross_attention", "gated", or "bilinear"
             embed_dim: CLIP embedding dimension
         """
         super().__init__()
@@ -181,6 +273,14 @@ class FusionModel(nn.Module):
                 num_heads=8,
                 hidden_dim=256
             )
+        elif fusion_type == "gated":
+            self.fusion_head = GatedFusionHead(embed_dim=embed_dim)
+        elif fusion_type == "simple_gated":
+            self.fusion_head = SimpleGatedFusion(embed_dim=embed_dim)
+        elif fusion_type == "simple_gated_with_bias":
+            self.fusion_head = SimpleGatedFusionWithBias(embed_dim=embed_dim)
+        elif fusion_type == "bilinear":
+            self.fusion_head = BilinearFusionHead(embed_dim=embed_dim)
         else:
             raise ValueError(f"Unknown fusion type: {fusion_type}")
     
@@ -220,15 +320,13 @@ class FusionModel(nn.Module):
             scores: (N, M) fused scores
         """
         if self.fusion_type == "linear":
-            # Compute similarities
+            # Compute similarities first
             t2i_sim = query_embed @ image_embed.T  # (N, M)
             t2t_sim = query_embed @ target_embed.T  # (N, M)
-            
-            # Fuse
             scores = self.fusion_head(t2i_sim, t2t_sim)
         
-        elif self.fusion_type == "cross_attention":
-            # Use cross-attention fusion
+        else:
+            # For other types, pass embeddings directly
             scores = self.fusion_head(query_embed, image_embed, target_embed)
         
         return scores
