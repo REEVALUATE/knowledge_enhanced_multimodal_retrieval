@@ -20,11 +20,12 @@ from sentence_transformers import SentenceTransformer
 import sys
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
-from ..datasets.clip_dataset import TextOnlyDataset as CLIPEvaluationDataset 
+from ..datasets.clip_dataset import TextOnlyDatasetHF as CLIPEvaluationDataset 
 from ..datasets.clip_dataset import collate_fn_eval_texts
 from src.clip.utils.data_utils import get_data_splits, load_splits_from_json
 from src.clip.utils.logging_utils import setup_logger, save_metrics_to_json
 from src.clip.eval.metrics import compute_retrieval_metrics
+from datasets import load_dataset
 
 logger = logging.getLogger(__name__)
 
@@ -177,7 +178,6 @@ def main():
                        help='Directory containing query-target JSON files')
     parser.add_argument('--images_dir', type=str, required=True,
                        help='Needed for data split generation')
-    parser.add_argument('--splits_file', type=str, default=None)
     parser.add_argument('--split', type=str, default='test',
                        choices=['train', 'val', 'test'])
     
@@ -218,19 +218,7 @@ def main():
     logger.info(f"Random seed: {args.seed}")
     logger.info("="*80)
     
-    # Get data splits
-    logger.info(f"\nLoading splits from {args.splits_file}")
-    train_uuids, val_uuids, test_uuids = load_splits_from_json(args.splits_file)
 
-    split_map = {
-        'train': train_uuids,
-        'val': val_uuids,
-        'test': test_uuids
-    }
-    selected_uuids = split_map[args.split]
-    
-    logger.info(f"Selected {len(selected_uuids)} samples from {args.split} split")
-    
     # Load model
     logger.info(f"\nLoading model: {args.model_name}")
     device = args.device if torch.cuda.is_available() else 'cpu'
@@ -239,15 +227,12 @@ def main():
     
     model = SentenceTransformer(args.model_name, device=device)
     
-    # Create dataset
     logger.info("\nCreating dataset...")
-    # dataset = TextOnlyDataset(
-    #     uuids=selected_uuids,
-    #     text_folder=args.texts_dir
-    # )
+    ds = load_dataset("xuemduan/reevaluate-image-text-pairs")
+
     dataset = CLIPEvaluationDataset(
-        uuids=selected_uuids,
-        text_folder=args.texts_dir
+        hf_dataset=ds[args.split],
+
     )
     
     # Evaluate
@@ -286,7 +271,7 @@ def main():
     results = {
         'model_name': args.model_name,
         'split': args.split,
-        'num_samples': len(selected_uuids),
+        'num_samples': len(dataset),
         'seed': args.seed,
         'metrics': metrics
     }

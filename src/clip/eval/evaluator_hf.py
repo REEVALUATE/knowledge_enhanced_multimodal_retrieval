@@ -31,6 +31,8 @@ from ..datasets.clip_dataset import collate_fn_eval
 from ..utils.data_utils import get_data_splits, load_splits_from_json
 from ..utils.logging_utils import setup_logger, save_metrics_to_json
 from .metrics import compute_all_retrieval_metrics, compute_training_metrics
+from ..datasets.clip_dataset import TextOnlyDatasetHF as CLIPEvaluationDataset 
+from datasets import load_dataset
 
 logger = logging.getLogger(__name__)
 
@@ -43,80 +45,6 @@ def seed_worker(worker_id):
     np.random.seed(worker_seed)
     random.seed(worker_seed)
 
-class CLIPEvaluationDataset(Dataset):
-    """
-    Evaluation dataset for CLIP with query-target pairs.
-    
-    Returns: (image, query, target_text)
-    """
-    
-    def __init__(
-        self,
-        uuids: List[str],
-        image_folder: str,
-        text_folder: str,
-        preprocessor=None,
-        max_text_length: int = 150
-    ):
-        self.uuids = uuids
-        self.image_folder = Path(image_folder)
-        self.text_folder = Path(text_folder)
-        self.preprocessor = preprocessor
-        self.max_text_length = max_text_length
-        
-        logger.info(f"Evaluation dataset initialized: {len(uuids)} samples")
-    
-    def __len__(self):
-        return len(self.uuids)
-    
-    def _truncate_text(self, text: str) -> str:
-        """Truncate text to max_text_length words."""
-        words = text.split()
-        if len(words) > self.max_text_length:
-            return " ".join(words[:self.max_text_length])
-        return text
-    
-    def __getitem__(self, idx):
-        uuid = self.uuids[idx]
-        
-        # Load image
-        image_path = self.image_folder / f"{uuid}.jpg"
-        if not image_path.exists():
-            for ext in ['.jpeg', '.png']:
-                alt_path = self.image_folder / f"{uuid}{ext}"
-                if alt_path.exists():
-                    image_path = alt_path
-                    break
-        
-        try:
-            image = Image.open(image_path).convert('RGB')
-            if self.preprocessor:
-                # Check if HuggingFace processor or OpenAI CLIP preprocess
-                if hasattr(self.preprocessor, 'image_processor'):
-                    # HuggingFace CLIPProcessor
-                    processed = self.preprocessor(images=image, return_tensors="pt")
-                    image = processed["pixel_values"].squeeze(0)  # [3,224,224]
-                else:
-                    # OpenAI CLIP preprocess
-                    image = self.preprocessor(image)
-        except Exception as e:
-            logger.error(f"Error loading image {uuid}: {e}")
-            image = torch.zeros(3, 224, 224)
-        
-        # Load texts
-        text_path = self.text_folder / f"{uuid}.json"
-        try:
-            with open(text_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                query = self._truncate_text(data.get('query', ''))
-                target_text = self._truncate_text(data.get('target_text', ''))
-                uuid = data.get('uuid', uuid)
-        except Exception as e:
-            logger.error(f"Error loading text for {uuid}: {e}")
-            query = ""
-            target_text = ""
-        
-        return image, query, target_text, uuid
     
 
 @torch.no_grad()
@@ -338,18 +266,6 @@ def main():
     logger.info(f"Random seed: {args.seed}")
     logger.info("="*80)
     
-
-    train_uuids, val_uuids, test_uuids = load_splits_from_json(args.splits_file)
-
-    
-    split_map = {
-        'train': train_uuids,
-        'val': val_uuids,
-        'test': test_uuids
-    }
-    selected_uuids = split_map[args.split]
-    
-    logger.info(f"Selected {len(selected_uuids)} samples from {args.split} split")
     
     # Load model
     logger.info("\nLoading model...")
@@ -369,13 +285,12 @@ def main():
 
 
     
-    # Create dataset
     logger.info("\nCreating dataset...")
+    ds = load_dataset("xuemduan/reevaluate-image-text-pairs")
+
     dataset = CLIPEvaluationDataset(
-        uuids=selected_uuids,
-        image_folder=args.images_dir,
-        text_folder=args.texts_dir,
-        preprocessor=preprocess
+        hf_dataset=ds[args.split],
+
     )
     
     # Evaluate
@@ -408,7 +323,7 @@ def main():
         'checkpoint': args.checkpoint,
         'split': args.split,
         'tasks': args.tasks,
-        'num_samples': len(selected_uuids),
+        'num_samples': len(dataset),
         'seed': args.seed,
         'metrics': metrics
     }

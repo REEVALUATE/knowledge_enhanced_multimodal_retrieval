@@ -13,39 +13,38 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-class CLIPTrainDataset(Dataset):
+from datasets import load_dataset
+from torch.utils.data import Dataset
+from PIL import Image
+import torch
+
+class CLIPTrainDatasetHF(Dataset):
     """
-    Training dataset for CLIP with query-target pairs.
+    Training dataset for CLIP using HuggingFace datasets.
     
     Returns: (image, query, target_text, uuid)
     """
     
     def __init__(
         self,
-        uuids: List[str],
-        image_folder: str,
-        text_folder: str,
+        hf_dataset,
         preprocessor=None,
         max_text_length: int = 150
     ):
         """
         Args:
-            uuids: List of sample UUIDs
-            image_folder: Path to images
-            text_folder: Path to text JSON files (new format with query/target_text)
+            hf_dataset: HuggingFace dataset split (e.g., ds["train"])
             preprocessor: Image preprocessing function
             max_text_length: Maximum number of words in text
         """
-        self.uuids = uuids
-        self.image_folder = Path(image_folder)
-        self.text_folder = Path(text_folder)
+        self.dataset = hf_dataset
         self.preprocessor = preprocessor
         self.max_text_length = max_text_length
         
-        logger.info(f"Training dataset initialized: {len(uuids)} samples")
+        logger.info(f"Training dataset initialized: {len(self.dataset)} samples")
     
     def __len__(self):
-        return len(self.uuids)
+        return len(self.dataset)
     
     def _truncate_text(self, text: str) -> str:
         """Truncate text to max_text_length words."""
@@ -55,68 +54,51 @@ class CLIPTrainDataset(Dataset):
         return text
     
     def __getitem__(self, idx):
-        uuid = self.uuids[idx]
+        sample = self.dataset[idx]
         
-        # Load image
-        image_path = self.image_folder / f"{uuid}.jpg"
-        if not image_path.exists():
-            for ext in ['.jpeg', '.png']:
-                alt_path = self.image_folder / f"{uuid}{ext}"
-                if alt_path.exists():
-                    image_path = alt_path
-                    break
-        
+        # Get image (already PIL Image from HF)
         try:
-            image = Image.open(image_path).convert('RGB')
+            image = sample['image']
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
             if self.preprocessor:
                 image = self.preprocessor(image)
         except Exception as e:
-            logger.error(f"Error loading image {uuid}: {e}")
+            logger.error(f"Error loading image {sample['uuid']}: {e}")
             if self.preprocessor:
                 image = torch.zeros(3, 224, 224)
             else:
                 image = Image.new('RGB', (224, 224))
         
-        # Load texts (new format)
-        text_path = self.text_folder / f"{uuid}.json"
-        try:
-            with open(text_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                query = self._truncate_text(data.get('query', ''))
-                target_text = self._truncate_text(data.get('target_text', ''))
-        except Exception as e:
-            logger.error(f"Error loading text for {uuid}: {e}")
-            query = ""
-            target_text = ""
+        # Get texts
+        query = self._truncate_text(sample['query_text'])
+        target_text = self._truncate_text(sample['target_text'])
+        uuid = sample['uuid']
         
         return image, query, target_text, uuid
 
 
-class CLIPEvalDataset(Dataset):
+class CLIPEvalDatasetHF(Dataset):
     """
-    Evaluation dataset for CLIP with query-target pairs.
+    Evaluation dataset for CLIP using HuggingFace datasets.
     
-    Returns: (image, query, target_text)
+    Returns: (image, query, target_text, uuid)
     """
     
     def __init__(
         self,
-        uuids: List[str],
-        image_folder: str,
-        text_folder: str,
+        hf_dataset,
         preprocessor=None,
         max_text_length: int = 150
     ):
-        self.uuids = uuids
-        self.image_folder = Path(image_folder)
-        self.text_folder = Path(text_folder)
+        self.dataset = hf_dataset
         self.preprocessor = preprocessor
         self.max_text_length = max_text_length
         
-        logger.info(f"Evaluation dataset initialized: {len(uuids)} samples")
+        logger.info(f"Evaluation dataset initialized: {len(self.dataset)} samples")
     
     def __len__(self):
-        return len(self.uuids)
+        return len(self.dataset)
     
     def _truncate_text(self, text: str) -> str:
         """Truncate text to max_text_length words."""
@@ -126,66 +108,48 @@ class CLIPEvalDataset(Dataset):
         return text
     
     def __getitem__(self, idx):
-        uuid = self.uuids[idx]
+        sample = self.dataset[idx]
         
-        # Load image
-        image_path = self.image_folder / f"{uuid}.jpg"
-        if not image_path.exists():
-            for ext in ['.jpeg', '.png']:
-                alt_path = self.image_folder / f"{uuid}{ext}"
-                if alt_path.exists():
-                    image_path = alt_path
-                    break
-        
+        # Get image
         try:
-            image = Image.open(image_path).convert('RGB')
+            image = sample['image']
+            if image.mode != 'RGB':
+                image = image.convert('RGB')
             if self.preprocessor:
-                image = self.preprocessor(image) #uncommented for all other clip model
-                # HuggingFace CLIPProcessor requires explicit keyword
-                # processed = self.preprocessor(images=image, return_tensors="pt")
-                # image = processed["pixel_values"].squeeze(0)   # (3,224,224)
+                image = self.preprocessor(image)
         except Exception as e:
-            logger.error(f"Error loading image {uuid}: {e}")
+            logger.error(f"Error loading image {sample['uuid']}: {e}")
             if self.preprocessor:
                 image = torch.zeros(3, 224, 224)
             else:
                 image = Image.new('RGB', (224, 224))
         
-        # Load texts
-        text_path = self.text_folder / f"{uuid}.json"
-        try:
-            with open(text_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                query = self._truncate_text(data.get('query', ''))
-                target_text = self._truncate_text(data.get('target_text', ''))
-                uuid = data.get('uuid', uuid)
-        except Exception as e:
-            logger.error(f"Error loading text for {uuid}: {e}")
-            query = ""
-            target_text = ""
+        # Get texts
+        query = self._truncate_text(sample['query_text'])
+        target_text = self._truncate_text(sample['target_text'])
+        uuid = sample['uuid']
         
         return image, query, target_text, uuid
 
-class TextOnlyDataset(Dataset):
+
+class TextOnlyDatasetHF(Dataset):
     """
-    Dataset for text-only models (MPNet, E5, GTE).
+    Dataset for text-only models using HuggingFace datasets.
     Only loads query and target_text, no images.
     """
     
     def __init__(
         self,
-        uuids: List[str],
-        text_folder: str,
+        hf_dataset,
         max_text_length: int = 150
     ):
-        self.uuids = uuids
-        self.text_folder = Path(text_folder)
+        self.dataset = hf_dataset
         self.max_text_length = max_text_length
         
-        logger.info(f"Text-only dataset initialized: {len(uuids)} samples")
+        logger.info(f"Text-only dataset initialized: {len(self.dataset)} samples")
     
     def __len__(self):
-        return len(self.uuids)
+        return len(self.dataset)
     
     def _truncate_text(self, text: str) -> str:
         """Truncate text to max_text_length words."""
@@ -195,18 +159,10 @@ class TextOnlyDataset(Dataset):
         return text
     
     def __getitem__(self, idx):
-        uuid = self.uuids[idx]
+        sample = self.dataset[idx]
         
-        text_path = self.text_folder / f"{uuid}.json"
-        try:
-            with open(text_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                query = self._truncate_text(data.get('query', ''))
-                target_text = self._truncate_text(data.get('target_text', ''))
-        except Exception as e:
-            logger.error(f"Error loading text for {uuid}: {e}")
-            query = ""
-            target_text = ""
+        query = self._truncate_text(sample['query_text'])
+        target_text = self._truncate_text(sample['target_text'])
         
         return query, target_text
 

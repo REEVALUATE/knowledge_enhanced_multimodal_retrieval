@@ -18,11 +18,12 @@ from tqdm import tqdm
 import clip
 
 from ..model.clip_model import load_clip_model
-from ..datasets.clip_dataset import CLIPEvalDataset as CLIPEvaluationDataset 
+from ..datasets.clip_dataset import CLIPEvalDatasetHF as CLIPEvaluationDataset 
 from ..datasets.clip_dataset import collate_fn_eval
 from ..utils.data_utils import get_data_splits, load_splits_from_json
 from ..utils.logging_utils import setup_logger, save_metrics_to_json
 from .metrics import compute_all_retrieval_metrics, compute_training_metrics
+from datasets import load_dataset
 
 logger = logging.getLogger(__name__)
 
@@ -159,8 +160,6 @@ def main():
     parser.add_argument('--images_dir', type=str, required=True)
     parser.add_argument('--texts_dir', type=str, required=True,
                        help='Directory containing query-target JSON files')
-    parser.add_argument('--splits_file', type=str, default=None,
-                       help='Path to saved splits JSON (if None, will generate)')
     parser.add_argument('--split', type=str, default='test',
                        choices=['train', 'val', 'test'])
     
@@ -214,29 +213,6 @@ def main():
     logger.info(f"Random seed: {args.seed}")
     logger.info("="*80)
     
-    # Get data splits
-    if args.splits_file and Path(args.splits_file).exists():
-        logger.info(f"\nLoading splits from {args.splits_file}")
-        train_uuids, val_uuids, test_uuids = load_splits_from_json(args.splits_file)
-    else:
-        logger.info("\nGenerating data splits...")
-        train_uuids, val_uuids, test_uuids = get_data_splits(
-            args.images_dir,
-            args.texts_dir,
-            test_size=0.15,
-            val_size=0.1,
-            random_seed=args.seed
-        )
-    
-    split_map = {
-        'train': train_uuids,
-        'val': val_uuids,
-        'test': test_uuids
-    }
-    selected_uuids = split_map[args.split]
-    
-    logger.info(f"Selected {len(selected_uuids)} samples from {args.split} split")
-    
     # Load model
     logger.info("\nLoading model...")
     device = args.device if torch.cuda.is_available() else 'cpu'
@@ -249,12 +225,11 @@ def main():
         device=device
     )
     
-    # Create dataset
     logger.info("\nCreating dataset...")
+    ds = load_dataset("xuemduan/reevaluate-image-text-pairs")
+
     dataset = CLIPEvaluationDataset(
-        uuids=selected_uuids,
-        image_folder=args.images_dir,
-        text_folder=args.texts_dir,
+        hf_dataset=ds[args.split],
         preprocessor=preprocess
     )
     
@@ -290,7 +265,7 @@ def main():
         'model_name': args.model_name,
         'checkpoint': args.checkpoint,
         'split': args.split,
-        'num_samples': len(selected_uuids),
+        'num_samples': len(dataset),
         'seed': args.seed,
         'metrics': metrics
     }

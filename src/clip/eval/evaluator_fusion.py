@@ -18,8 +18,9 @@ import clip
 
 from ..utils.data_utils import load_splits_from_json
 from ..model.clip_model import load_clip_model
-from ..datasets.clip_dataset import CLIPEvalDataset, collate_fn_eval
+from ..datasets.clip_dataset import CLIPEvalDatasetHF, collate_fn_eval
 from ..model.fusion_model import FusionModel
+from datasets import load_dataset
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,7 @@ logger = logging.getLogger(__name__)
 @torch.no_grad()
 def evaluate_fusion_model(
     fusion_model: FusionModel,
-    dataset: CLIPEvalDataset,
+    dataset: CLIPEvalDatasetHF,
     batch_size: int = 64,
     device: str = 'cuda'
 ) -> Dict[str, float]:

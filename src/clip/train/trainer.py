@@ -29,9 +29,10 @@ except ImportError:
     WANDB_AVAILABLE = False
 
 from ..model.clip_model import load_clip_model
-from ..datasets.clip_dataset import CLIPTrainDataset, CLIPEvalDataset, collate_fn_train, collate_fn_eval
+from ..datasets.clip_dataset import CLIPTrainDatasetHF, CLIPEvalDatasetHF, collate_fn_train, collate_fn_eval
 from .losses import JointContrastiveLoss
 from ..eval.evaluator import evaluate_clip_model_for_training
+from datasets import load_dataset
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +65,7 @@ class CLIPTrainer:
         model,
         train_loader: DataLoader,
         val_loader: DataLoader,
-        val_eval_dataset: Optional[CLIPEvalDataset],
+        val_eval_dataset: Optional[CLIPEvalDatasetHF],
         loss_fn: nn.Module,
         optimizer: torch.optim.Optimizer,
         scheduler: Optional[torch.optim.lr_scheduler._LRScheduler] = None,
@@ -375,13 +376,7 @@ def main_worker(rank, world_size, args):
     np.random.seed(args.seed + rank)
     random.seed(args.seed + rank)
     
-    # Load data splits
-    logger.info(f"Loading data splits from {args.splits_file}") if rank == 0 else None
-    train_uuids, val_uuids, test_uuids = load_splits_from_json(args.splits_file)
-    
-    if rank == 0:
-        logger.info(f"Train: {len(train_uuids)}, Val: {len(val_uuids)}, Test: {len(test_uuids)}")
-    
+
     # Load model
     if rank == 0:
         logger.info(f"Loading model: {args.model_name}")
@@ -394,19 +389,23 @@ def main_worker(rank, world_size, args):
 
     model = model.float()
     
+        
+    # 加载 HuggingFace 数据集
+    logger.info(f"Loading dataset from HuggingFace: xuemduan/reevaluate-image-text-pairs") if rank == 0 else None
+    ds = load_dataset("xuemduan/reevaluate-image-text-pairs")
+
+    if rank == 0:
+        logger.info(f"Train: {len(ds['train'])}, Val: {len(ds['validation'])}, Test: {len(ds['test'])}")
+
     # Create datasets
-    train_dataset = CLIPTrainDataset(
-        uuids=train_uuids,
-        image_folder=args.images_dir,
-        text_folder=args.texts_dir,
+    train_dataset = CLIPTrainDatasetHF(
+        hf_dataset=ds['train'],
         preprocessor=preprocess,
         max_text_length=args.max_text_length
     )
-    
-    val_dataset = CLIPTrainDataset(
-        uuids=val_uuids,
-        image_folder=args.images_dir,
-        text_folder=args.texts_dir,
+
+    val_dataset = CLIPTrainDatasetHF(
+        hf_dataset=ds['validation'],
         preprocessor=preprocess,
         max_text_length=args.max_text_length
     )
@@ -414,10 +413,8 @@ def main_worker(rank, world_size, args):
     # Create evaluation dataset (only on rank 0)
     val_eval_dataset = None
     if rank == 0:
-        val_eval_dataset = CLIPEvalDataset(
-            uuids=val_uuids,
-            image_folder=args.images_dir,
-            text_folder=args.texts_dir,
+        val_eval_dataset = CLIPEvalDatasetHF(
+            hf_dataset=ds['validation'],
             preprocessor=preprocess,
             max_text_length=args.max_text_length
         )
@@ -541,7 +538,6 @@ def main():
     parser.add_argument('--images_dir', type=str, required=True)
     parser.add_argument('--texts_dir', type=str, required=True,
                        help='Directory with query-target JSON files')
-    parser.add_argument('--splits_file', type=str, required=True)
     parser.add_argument('--max_text_length', type=int, default=150,
                        help='Maximum text length in words')
     

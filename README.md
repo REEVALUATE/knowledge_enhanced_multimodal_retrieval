@@ -28,7 +28,7 @@ The full system architecture is shown below, illustrating the multimodal CLIP re
 This repository publicly releases **all reproducible components** used in the paper:
 
 ### ✔️ **1. Dataset: Image–Text Pairs**
-Used for CLIP fine-tuning and benchmarking (generated from the [KG](https://loki.linksfoundation.com/reevaluate-graphdb/graphs) ). [The huggingface dataset download speed to be optimized, expected down by 08/12]
+Used for CLIP fine-tuning and benchmarking (generated from the [KG](https://loki.linksfoundation.com/reevaluate-graphdb/graphs) ). 
 
 Dataset includes:
 - Artefact image  
