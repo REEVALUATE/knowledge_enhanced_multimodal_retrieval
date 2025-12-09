@@ -76,44 +76,6 @@ class RetrievalEngine:
         return fused
 
 
-
-    def retrieve_cir(self, image: bytes, query_text: str, threshold: float = 0.0):
-        """
-        Call remote CIR API with uploaded image and query text.
-        image: bytes (from UploadFile.read())
-        query_text: textual query to filter results
-        limit: number of results
-        threshold: minimum score threshold
-        """
-        params = {"query": query_text, "limit": 100000}
-
-        files = {
-            "file": ("uploaded.jpg", BytesIO(image), "image/jpeg")
-        }
-
-        response = requests.post(
-            self.cir_endpoint,
-            params=params,
-            headers=self.cir_headers,
-            files=files,       # FIXED here
-            timeout=60
-        )
-
-        if response.status_code != 200:
-            raise Exception(f"CIR API error {response.status_code}: {response.text}")
-
-        try:
-            data = response.json()
-        except Exception as e:
-            raise Exception(f"Invalid JSON response: {e}")
-
-        print(f"CIR API returned {len(data)} results")
-        return [
-            {"uuid": item["image_id"], "score": item["score"]}
-            for item in data
-            if item.get("score", 0) >= threshold
-        ]
-
     def retrieve_text(self, query: str, alpha: float = 0.8, beta: float = 0.2, alpha_clip: float = 0.5, threshold: float = 0):
         clip_results = self.clip_retriever.retrieval(query, alpha=alpha_clip)
         t2s_results = self.t2s_retriever.retrieval(query)

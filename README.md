@@ -91,7 +91,7 @@ scripts/
 │ ├── baselines/ # CLIP Baselines Performance
 │ ├── fusion/ # CLIP fusion evaluation
 │ └── ...
-│
+├── retrieval.py # final knowledge-enhanced multimodal retrieval script
 ```
 
 ## Usage
@@ -132,6 +132,13 @@ bash scripts/fine-tuning/eval.sh
 
 ```bash
 bash scripts/fusion/eval.sh
+```
+
+### ⚙️ **3. Retrieval (CLIP+Text2SPARQL)**
+
+```
+from src.retrieval import RetrievalEngine
+retrieval = RetrievalEngine()
 ```
 
 ## 📝 License
