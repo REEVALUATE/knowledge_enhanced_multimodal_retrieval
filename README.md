@@ -82,15 +82,14 @@ src/
 │ └── ... #
 │
 ├── text2sparql/
-│ ├── entity_linking/ # SPARQL-based entity resolution
-│ ├── json2sparql/ # Python re-implementation of Sparnatural AI logic
-│ └── text2sparql_retrieval/ # KG querying utilities
+│ ├── entity_linking.py # SPARQL-based entity resolution
+│ ├── json2sparql.py # Python re-implementation of Sparnatural AI logic
+│ └── text2sparql_retrieval.py # KG querying utilities
 │
 scripts/ 
-│ ├── train_clip.sh # CLIP fine-tuning script
-│ ├── eval_clip.sh # Batch evaluation scripts
-│ ├── run_text2sparql.sh # Text2SPARQL evaluation
-│ ├── run_fusion.sh # Combined evaluation
+│ ├── fine-tuning/ # CLIP fine-tuning script
+│ ├── baselines/ # CLIP Baselines Performance
+│ ├── fusion/ # CLIP fusion evaluation
 │ └── ...
 │
 ```
