@@ -113,15 +113,26 @@ The Text2SPARQL component is:
 
 ## 🚀 Usage Examples
 
+### ⚙️ **1. Baselines**
+
+```bash
+bash scripts/baselines/run_clip_base_b32.sh
+
+bash scripts/baselines/run_clip_base_l14.sh
+```
+
 ### ⚙️ **1. Fine-tune CLIP**
 
 ```bash
-bash scripts/train_clip.sh \
-  --dataset ./data/reevaluate \
-  --epochs 20 \
-  --lr 5e-6 \
-  --batch 64 \
-  --model ViT-L-14
+bash scripts/fine-tuning/train.sh
+
+bash scripts/fine-tuning/eval.sh
+```
+
+### ⚙️ **2. Fusion evaluation**
+
+```bash
+bash scripts/fusion/eval.sh
 ```
 
 ## 📝 License
